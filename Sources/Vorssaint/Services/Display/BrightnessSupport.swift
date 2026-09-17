@@ -176,6 +176,10 @@ enum BrightnessSupport {
 
     // MARK: - Display switching
 
+    static func canConfigureDisplay(enabled: Bool, isBuiltIn: Bool, lidClosed: Bool?) -> Bool {
+        !(enabled && isBuiltIn && lidClosed == true)
+    }
+
     /// Turning off the final drawable display would leave no UI path to turn
     /// it back on. The target must be active and another active display must
     /// remain after the transaction.

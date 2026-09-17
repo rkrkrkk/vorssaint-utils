@@ -663,6 +663,9 @@ final class BrightnessService: ObservableObject {
             return false
         }
         guard let configure = DisplayConfigurationBridge.configureEnabled else { return false }
+        guard BrightnessSupport.canConfigureDisplay(
+            enabled: enabled, isBuiltIn: CGDisplayIsBuiltin(id) != 0,
+            lidClosed: enabled ? lidClosed() : nil) else { return false }
         var reference: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&reference) == .success,
               let configuration = reference else { return false }
@@ -671,6 +674,15 @@ final class BrightnessService: ObservableObject {
             return false
         }
         return CGCompleteDisplayConfiguration(configuration, .forAppOnly) == .success
+    }
+
+    private static func lidClosed() -> Bool? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                  IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        return IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString,
+                                              kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
     }
 
     private static func activeDisplayIDs() -> Set<CGDirectDisplayID> {
