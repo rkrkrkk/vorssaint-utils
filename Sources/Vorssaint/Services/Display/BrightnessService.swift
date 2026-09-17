@@ -80,6 +80,7 @@ final class BrightnessService: ObservableObject {
         case unavailable
         case lastActive
         case failed
+        case closedLid
     }
 
     private struct Route {
@@ -90,6 +91,9 @@ final class BrightnessService: ObservableObject {
         var ddcPathKey: String?
     }
 
+    private var deferredRestoration = BrightnessSupport.DeferredDisplayRestoration()
+    private var lidNotificationPort: IONotificationPortRef?
+    private var lidNotification: io_object_t = 0
     private var screenObserver: NSObjectProtocol?
     private var rebuildDebounce: DispatchWorkItem?
     private var wakeObservers: [NSObjectProtocol] = []
@@ -588,9 +592,11 @@ final class BrightnessService: ObservableObject {
     /// reconfiguration and the bookkeeping that follows it.
     private func commitDisplayToggle(_ display: BrightnessDisplay, enabled: Bool) {
         if !enabled { Self.rememberDisplaySwitchedOff(display.id) }
-        guard Self.configureDisplay(display.id, enabled: enabled) else {
+        let result = Self.configureDisplay(display.id, enabled: enabled)
+        guard result == .success else {
             if !enabled { Self.forgetDisplaySwitchedOff(display.id) }
-            finishDisplayToggle(id: display.id, enabled: enabled, failure: .failed)
+            finishDisplayToggle(id: display.id, enabled: enabled,
+                                failure: result == .closedLid ? .closedLid : .failed)
             return
         }
 
@@ -618,6 +624,8 @@ final class BrightnessService: ObservableObject {
         // (issue #647). Running here on the main thread is what keeps that from
         // happening today, and the thread this runs on is not something the
         // lock should have to depend on.
+        deferredRestoration.record(display.id, result: .success)
+        syncLidObserver()
         if enabled { Self.forgetDisplaySwitchedOff(display.id) }
         finishDisplayToggle(id: display.id, enabled: enabled, failure: nil)
     }
@@ -657,23 +665,25 @@ final class BrightnessService: ObservableObject {
     /// the display list, and neither side can finish, so the app freezes with
     /// nothing left that can end it (issue #747). A caller on the wrong
     /// thread is refused and logged rather than allowed to hang.
-    private static func configureDisplay(_ id: CGDirectDisplayID, enabled: Bool) -> Bool {
+    private static func configureDisplay(
+        _ id: CGDirectDisplayID, enabled: Bool
+    ) -> BrightnessSupport.DisplayConfigurationResult {
         guard Thread.isMainThread else {
             log.error("refused to reconfigure display \(id) off the main thread")
-            return false
+            return .failed
         }
-        guard let configure = DisplayConfigurationBridge.configureEnabled else { return false }
+        guard let configure = DisplayConfigurationBridge.configureEnabled else { return .failed }
         guard BrightnessSupport.canConfigureDisplay(
             enabled: enabled, isBuiltIn: CGDisplayIsBuiltin(id) != 0,
-            lidClosed: enabled ? lidClosed() : nil) else { return false }
+            lidClosed: enabled ? lidClosed() : nil) else { return .closedLid }
         var reference: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&reference) == .success,
-              let configuration = reference else { return false }
+              let configuration = reference else { return .failed }
         guard configure(configuration, id, enabled) == 0 else {
             CGCancelDisplayConfiguration(configuration)
-            return false
+            return .failed
         }
-        return CGCompleteDisplayConfiguration(configuration, .forAppOnly) == .success
+        return CGCompleteDisplayConfiguration(configuration, .forAppOnly) == .success ? .success : .failed
     }
 
     private static func lidClosed() -> Bool? {
@@ -683,6 +693,59 @@ final class BrightnessService: ObservableObject {
         defer { IOObjectRelease(service) }
         return IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString,
                                               kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
+    }
+
+    /// These requests outlive the brightness feature, but never the app.
+    private func restoreDisplay(_ id: CGDirectDisplayID) -> Bool {
+        let result = Self.configureDisplay(id, enabled: true)
+        deferredRestoration.record(id, result: result)
+        syncLidObserver()
+        return result == .success
+    }
+
+    private func syncLidObserver() {
+        if deferredRestoration.ids.isEmpty {
+            if lidNotification != 0 { IOObjectRelease(lidNotification) }
+            lidNotification = 0
+            if let lidNotificationPort { IONotificationPortDestroy(lidNotificationPort) }
+            lidNotificationPort = nil
+            return
+        }
+        guard lidNotificationPort == nil else { return }
+        let root = IOServiceGetMatchingService(kIOMainPortDefault,
+                                               IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return }
+        defer { IOObjectRelease(root) }
+        guard let port = IONotificationPortCreate(kIOMainPortDefault) else { return }
+        let result = IOServiceAddInterestNotification(
+            port, root, kIOGeneralInterest, { context, _, _, _ in
+                guard let context else { return }
+                let service = Unmanaged<BrightnessService>.fromOpaque(context).takeUnretainedValue()
+                // Root-domain general interest includes clamshell changes. Read
+                // the current property outside the callback before configuring.
+                DispatchQueue.main.async { [weak service] in service?.restoreDeferredDisplays() }
+            }, Unmanaged.passUnretained(self).toOpaque(), &lidNotification)
+        guard result == KERN_SUCCESS else {
+            IONotificationPortDestroy(port)
+            Self.log.error("could not observe deferred display restoration: \(result)")
+            return
+        }
+        lidNotificationPort = port
+        IONotificationPortSetDispatchQueue(port, DispatchQueue.main)
+        // Subscribe before rechecking: the lid may have opened since denial.
+        DispatchQueue.main.async { [weak self] in self?.restoreDeferredDisplays() }
+    }
+
+    private func restoreDeferredDisplays() {
+        for id in deferredRestoration.candidates(lidClosed: Self.lidClosed()) {
+            guard restoreDisplay(id) else { continue }
+            stateLock.lock()
+            managedDisabledIDs.remove(id)
+            managedDisabledDisplays.removeValue(forKey: id)
+            stateLock.unlock()
+            Self.forgetDisplaySwitchedOff(id)
+            refresh(force: true)
+        }
     }
 
     private static func activeDisplayIDs() -> Set<CGDirectDisplayID> {
@@ -721,7 +784,7 @@ final class BrightnessService: ObservableObject {
         let ids = managedDisabledIDs
         stateLock.unlock()
         for id in ids {
-            guard Self.configureDisplay(id, enabled: true) else { continue }
+            guard restoreDisplay(id) else { continue }
             stateLock.lock()
             managedDisabledIDs.remove(id)
             managedDisabledDisplays.removeValue(forKey: id)
@@ -780,7 +843,7 @@ final class BrightnessService: ObservableObject {
             // imported, so anything that is not a display number is skipped
             // rather than converted.
             guard let displayID = CGDirectDisplayID(exactly: id) else { continue }
-            guard Self.configureDisplay(displayID, enabled: true) else { continue }
+            guard restoreDisplay(displayID) else { continue }
             Self.forgetDisplaySwitchedOff(displayID)
         }
     }
@@ -1285,7 +1348,7 @@ final class BrightnessService: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             var restored: CGDirectDisplayID?
-            for id in candidates where Self.configureDisplay(id, enabled: true) {
+            for id in candidates where self.restoreDisplay(id) {
                 restored = id
                 break
             }

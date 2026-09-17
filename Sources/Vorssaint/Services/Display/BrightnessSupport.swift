@@ -176,6 +176,30 @@ enum BrightnessSupport {
 
     // MARK: - Display switching
 
+    enum DisplayConfigurationResult: Equatable {
+        case success, closedLid, failed
+    }
+
+    /// Only automatic restoration denied by the lid owns a deferred request.
+    struct DeferredDisplayRestoration {
+        private(set) var ids = Set<UInt32>()
+        private var lastLidClosed: Bool? = true
+
+        mutating func record(_ id: UInt32, result: DisplayConfigurationResult) {
+            if result == .closedLid {
+                ids.insert(id)
+                lastLidClosed = true
+            }
+            if result == .success { ids.remove(id) }
+        }
+
+        mutating func candidates(lidClosed: Bool?) -> Set<UInt32> {
+            let opened = lidClosed == false && lastLidClosed != false
+            if let lidClosed { lastLidClosed = lidClosed }
+            return opened ? ids : []
+        }
+    }
+
     static func canConfigureDisplay(enabled: Bool, isBuiltIn: Bool, lidClosed: Bool?) -> Bool {
         !(enabled && isBuiltIn && lidClosed == true)
     }
