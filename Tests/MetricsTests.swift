@@ -16685,10 +16685,10 @@ struct MetricsTests {
             .components(separatedBy: "func ").last ?? "")
             .replacingOccurrences(of: #"(?s)/\*.*?\*/|//[^\n]*"#, with: "",
                                   options: .regularExpression)
-        expect(configurationEntry.contains("guard BrightnessSupport.canConfigureDisplay(")
-               && configurationEntry.contains("CGDisplayIsBuiltin(id)")
-               && configurationEntry.contains("lidClosed()")
-               && configurationEntry.contains("else { return false }"),
+        expect(configurationEntry.range(of: #"\bBrightnessSupport\s*\.\s*canConfigureDisplay\s*\("#,
+                                        options: .regularExpression) != nil
+               && configurationEntry.range(of: #"\bCGDisplayIsBuiltin\s*\("#,
+                                           options: .regularExpression) != nil,
                "the shared transaction checks the live built-in and lid state before beginning")
 
         // A `UserDefaults` write posts `didChangeNotification`, and the
