@@ -48,7 +48,8 @@ def main():
               "    private static func configureDisplay(", "    private func restoreDisplay(",
               "    private func syncLidObserver(", "    private func restoreDeferredDisplays(",
               "    private func restoreManagedDisplays(", "    func restoreDisplaysLeftOff(",
-              "    private func commitDisplayToggle("])
+              "    private func commitDisplayToggle(", "    private func finishDisplayToggle(",
+              "    private func restoreManagedDisplayIfHeadless("])
           + "}\n}\n")
     dock = "Sources/Vorssaint/Services/DockPreview/DockPreviewService.swift"
     write("DockPreviewScope.swift", "import Foundation\nextension DockPreviewScopeTests.Service {\n"

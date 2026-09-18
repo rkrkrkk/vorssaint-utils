@@ -632,7 +632,7 @@ final class BrightnessService: ObservableObject {
 
     private func finishDisplayToggle(id: CGDirectDisplayID, enabled: Bool,
                                      failure: DisplayControlFailure?) {
-        DispatchQueue.main.async { [weak self] in
+        let finish = { [weak self] in
             guard let self else { return }
             self.pendingDisplayIDs.remove(id)
             self.displayControlFailure = failure
@@ -642,6 +642,9 @@ final class BrightnessService: ObservableObject {
                 self.refresh()
             }
         }
+        // Publish a main-thread transaction before queued lid recovery can
+        // succeed, otherwise its old failure could overwrite that success.
+        if Thread.isMainThread { finish() } else { DispatchQueue.main.async(execute: finish) }
     }
 
     /// The active list can include virtual devices with no picture a person
@@ -696,11 +699,12 @@ final class BrightnessService: ObservableObject {
     }
 
     /// These requests outlive the brightness feature, but never the app.
-    private func restoreDisplay(_ id: CGDirectDisplayID) -> Bool {
+    private func restoreDisplay(_ id: CGDirectDisplayID) -> BrightnessSupport.DisplayConfigurationResult {
         let result = Self.configureDisplay(id, enabled: true)
         deferredRestoration.record(id, result: result)
         syncLidObserver()
-        return result == .success
+        if result == .success { displayControlFailure = nil }
+        return result
     }
 
     private func syncLidObserver() {
@@ -738,7 +742,7 @@ final class BrightnessService: ObservableObject {
 
     private func restoreDeferredDisplays() {
         for id in deferredRestoration.candidates(lidClosed: Self.lidClosed()) {
-            guard restoreDisplay(id) else { continue }
+            guard restoreDisplay(id) == .success else { continue }
             stateLock.lock()
             managedDisabledIDs.remove(id)
             managedDisabledDisplays.removeValue(forKey: id)
@@ -784,7 +788,7 @@ final class BrightnessService: ObservableObject {
         let ids = managedDisabledIDs
         stateLock.unlock()
         for id in ids {
-            guard restoreDisplay(id) else { continue }
+            guard restoreDisplay(id) == .success else { continue }
             stateLock.lock()
             managedDisabledIDs.remove(id)
             managedDisabledDisplays.removeValue(forKey: id)
@@ -843,7 +847,7 @@ final class BrightnessService: ObservableObject {
             // imported, so anything that is not a display number is skipped
             // rather than converted.
             guard let displayID = CGDirectDisplayID(exactly: id) else { continue }
-            guard restoreDisplay(displayID) else { continue }
+            guard restoreDisplay(displayID) == .success else { continue }
             Self.forgetDisplaySwitchedOff(displayID)
         }
     }
@@ -1348,9 +1352,14 @@ final class BrightnessService: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             var restored: CGDirectDisplayID?
-            for id in candidates where self.restoreDisplay(id) {
-                restored = id
-                break
+            var failure: DisplayControlFailure = .closedLid
+            for id in candidates {
+                let result = self.restoreDisplay(id)
+                if result == .success {
+                    restored = id
+                    break
+                }
+                if result == .failed { failure = .failed }
             }
             if let restored {
                 self.stateLock.lock()
@@ -1363,7 +1372,7 @@ final class BrightnessService: ObservableObject {
                 Self.log.error("could not restore a display after the active display set became empty")
             }
             self.pendingDisplayIDs.subtract(candidates)
-            self.displayControlFailure = restored == nil ? .failed : nil
+            self.displayControlFailure = restored == nil ? failure : nil
             self.refresh(force: true)
         }
         return true

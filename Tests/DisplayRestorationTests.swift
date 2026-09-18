@@ -48,6 +48,7 @@ enum DisplayRestorationTests {
         let id: UInt32
         var method: Int? = 1
         var isActive = false
+        var isBuiltIn: Bool { id == 1 }
     }
     enum DisplayConfigurationBridge {
         static var configureEnabled: ((Int, UInt32, Bool) -> Int32)? = { _, _, _ in 0 }
@@ -94,15 +95,15 @@ enum DisplayRestorationTests {
         var managedDisabledDisplays: [UInt32: BrightnessDisplay] = [:]
         var pendingLevels: [UInt32: Double] = [:]
         var knownActiveTopology = Set<UInt32>()
-        var failure: BrightnessService.DisplayControlFailure?
+        var displayControlFailure: BrightnessService.DisplayControlFailure?
+        var pendingDisplayIDs = Set<UInt32>()
+        var displays: [BrightnessDisplay] = []
         var refreshes = 0
         static func lidClosed() -> Bool? { Hardware.lid }
         static func rememberDisplaySwitchedOff(_ id: UInt32) { UserDefaults.standard.stored.append(Int(id)) }
         static func forgetDisplaySwitchedOff(_ id: UInt32) { UserDefaults.standard.stored.removeAll { $0 == Int(id) } }
         func refresh(force: Bool = false) { refreshes += 1 }
-        func finishDisplayToggle(id: UInt32, enabled: Bool, failure: BrightnessService.DisplayControlFailure?) {
-            self.failure = failure
-        }
+
     }
 
     static func run(_ suite: TestSuite) {
@@ -176,13 +177,14 @@ enum DisplayRestorationTests {
         }
         Hardware.lid = true
         DispatchQueue.main.drain()
-        suite.expect(service.failure == .closedLid && Hardware.transactions == 0
+        suite.expect(service.displayControlFailure == .closedLid && Hardware.transactions == 0
                      && service.deferredRestoration.ids.isEmpty,
                      "manual enable uses transaction-time closed reason without enrolling a deferred request")
         Hardware.lid = false
         Hardware.succeeds = false
         service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
-        suite.expect(service.failure == .failed, "an open-lid transaction failure remains generic")
+        DispatchQueue.main.drain()
+        suite.expect(service.displayControlFailure == .failed, "an open-lid transaction failure remains generic")
 
         service = make()
         UserDefaults.standard.stored = [1]
@@ -193,5 +195,81 @@ enum DisplayRestorationTests {
         suite.expect(service.deferredRestoration.ids.isEmpty && Hardware.transactions == 1
                      && Hardware.destroyedPorts == 1 && service.managedDisabledIDs == [1],
                      "new explicit disable cancels older deferred recovery before queued recheck")
+
+        for initialFailure in [BrightnessService.DisplayControlFailure.failed, .closedLid] {
+            service = make()
+            UserDefaults.standard.stored = [1]
+            service.managedDisabledIDs = [1]
+            service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+            service.restoreDisplaysLeftOff()
+            DispatchQueue.main.drain()
+            Hardware.lid = initialFailure == .closedLid
+            Hardware.succeeds = false
+            service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
+            DispatchQueue.main.drain()
+            suite.expect(service.displayControlFailure == initialFailure,
+                         "production manual completion publishes the actual failure")
+            Hardware.lid = true
+            service.restoreDeferredDisplays()
+            Hardware.lid = false
+            service.restoreDeferredDisplays()
+            DispatchQueue.main.drain()
+            suite.expect(service.displayControlFailure == initialFailure
+                         && UserDefaults.standard.stored == [1],
+                         "failed deferred restoration preserves the existing error and recovery intent")
+            Hardware.lid = true
+            service.restoreDeferredDisplays()
+            Hardware.lid = false
+            Hardware.succeeds = true
+            service.restoreDeferredDisplays()
+            DispatchQueue.main.drain()
+            suite.expect(service.displayControlFailure == nil && UserDefaults.standard.stored.isEmpty,
+                         "successful deferred restoration clears generic and closed-lid errors")
+        }
+
+        service = make()
+        service.managedDisabledIDs = [1]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.displayControlFailure == .closedLid,
+                     "headless restoration preserves the closed-lid denial reason")
+        Hardware.lid = false
+        Hardware.callback?()
+        DispatchQueue.main.drain()
+        suite.expect(service.displayControlFailure == nil,
+                     "successful headless deferred recovery removes its panel error")
+
+        service = make()
+        UserDefaults.standard.stored = [1]
+        service.restoreDisplaysLeftOff()
+        service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
+        Hardware.lid = false
+        DispatchQueue.main.drain()
+        suite.expect(service.displayControlFailure == nil && Hardware.transactions == 1,
+                     "queued manual completion cannot republish denial after earlier queued recovery succeeds")
+
+        for startup in [true, false] {
+            service = make()
+            service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
+            UserDefaults.standard.stored = [1]
+            service.managedDisabledIDs = [1]
+            service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+            Hardware.lid = false
+            if startup { service.restoreDisplaysLeftOff() } else { service.restoreManagedDisplays() }
+            DispatchQueue.main.drain()
+            suite.expect(service.displayControlFailure == nil && UserDefaults.standard.stored.isEmpty,
+                         "startup and feature-stop success share restoration error cleanup")
+        }
+
+        service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        Hardware.succeeds = false
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.displayControlFailure == .failed,
+                     "a genuine headless transaction failure is not mislabeled as a closed-lid denial")
     }
 }
