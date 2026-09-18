@@ -530,6 +530,29 @@ def main():
           + "}\n}\nextension NotchMusicAutomationFlowContract.NotchMusicAutomation {\n"
           + declaration("Sources/Vorssaint/Services/Notch/NotchMusicAutomation.swift", "    static func send(") + "}\n")
 
+    brightness_row = "Sources/Vorssaint/UI/MenuPanel/BrightnessSection.swift"
+    write("SoftwareDimmingRow.swift", "import CoreGraphics\nimport Foundation\n\n"
+          + "extension SoftwareDimmingRouteContract {\n"
+          + "final class Row {\nvar display = Display()\nvar chosen = false\n"
+          + declaration(brightness_row, "    private var offered:").replace("private var", "var", 1)
+          + "}\n}\n")
+
+    brightness = "Sources/Vorssaint/Services/Display/BrightnessService.swift"
+    write("SoftwareDimmingRoute.swift", "import CoreGraphics\nimport Foundation\n\n"
+          + "extension SoftwareDimmingRouteContract {\n"
+          + "final class Service {\nlet stateLock = NSLock()\nlet workQueue = Queue()\n"
+          + "static let log = Log()\n"
+          + "var routes: [CGDirectDisplayID: Route] = [:]\n"
+          + "var lastApplied: [CGDirectDisplayID: Double] = [:]\n"
+          + "var levelKnownAt: [CGDirectDisplayID: Foundation.Date] = [:]\n"
+          + "var softwareDims: [(id: CGDirectDisplayID, value: Double)] = []\n"
+          + "var forgottenWriteOnlyPaths: [String] = []\nvar refreshes = 0\n"
+          + "func forgetWriteOnlyDDCPath(_ path: String?) { forgottenWriteOnlyPaths.append(path ?? \"\") }\n"
+          + "func applySoftwareDim(_ id: CGDirectDisplayID, value: Double) { softwareDims.append((id, value)) }\n"
+          + "func refresh(force: Bool = false) { refreshes += 1 }\n"
+          + declaration(brightness, "    func setSoftwareDimmingPreferred(")
+          + "}\n}\n")
+
     keep_awake = "Sources/Vorssaint/Services/KeepAwakeManager.swift"
     write("KeepAwakeTimerHandoff.swift", "import Foundation\n\nextension KeepAwakeTimerHandoffContract {\n"
           + "final class Service {\nvar sessionTrigger = SessionTrigger.manual\n"
