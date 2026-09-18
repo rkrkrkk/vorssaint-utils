@@ -37,6 +37,7 @@ enum DisplayRestorationTests {
         static var released: [UInt32] = []
         static var callback: (() -> Void)?
         static var onSubscribe: (() -> Void)?
+        static var lidRead: (() -> Bool?)?
     }
     enum DefaultsKey { static let displaysSwitchedOff = "off" }
     final class UserDefaults {
@@ -99,7 +100,7 @@ enum DisplayRestorationTests {
         var pendingDisplayIDs = Set<UInt32>()
         var displays: [BrightnessDisplay] = []
         var refreshes = 0
-        static func lidClosed() -> Bool? { Hardware.lid }
+        static func lidClosed() -> Bool? { Hardware.lidRead?() ?? Hardware.lid }
         static func rememberDisplaySwitchedOff(_ id: UInt32) { UserDefaults.standard.stored.append(Int(id)) }
         static func forgetDisplaySwitchedOff(_ id: UInt32) { UserDefaults.standard.stored.removeAll { $0 == Int(id) } }
         func refresh(force: Bool = false) { refreshes += 1 }
@@ -118,6 +119,7 @@ enum DisplayRestorationTests {
             Hardware.released = []
             Hardware.callback = nil
             Hardware.onSubscribe = nil
+            Hardware.lidRead = nil
             return BrightnessService()
         }
         var service = make()
@@ -292,13 +294,31 @@ enum DisplayRestorationTests {
         Hardware.succeeds = false
         _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
         DispatchQueue.main.drain()
+        Hardware.lid = false
         service.restoreManagedDisplays()
         DispatchQueue.main.drain()
+        Hardware.lid = true
         Hardware.succeeds = true
         _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
         DispatchQueue.main.drain()
         suite.expect(service.deferredRestoration.ids == [1],
                      "a later failed restore-all request promotes prior headless intent")
+
+        service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        var lidReads = [true, false, true]
+        Hardware.lidRead = { lidReads.isEmpty ? true : lidReads.removeFirst() }
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids.isEmpty,
+                     "headless candidate retry uses the shared transaction-time lid result")
+        Hardware.lid = false
+        service.restoreDeferredDisplays()
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 1,
+                     "opening after a successful external headless recovery does not enable the internal display")
 
         service = make()
         UserDefaults.standard.stored = [1]
