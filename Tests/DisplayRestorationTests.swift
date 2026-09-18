@@ -241,6 +241,38 @@ enum DisplayRestorationTests {
                      "successful headless deferred recovery removes its panel error")
 
         service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids.isEmpty && service.managedDisabledIDs == [1]
+                     && Hardware.destroyedPorts == 1,
+                     "headless success cancels only the newly queued closed-lid candidate")
+        Hardware.lid = false
+        service.restoreDeferredDisplays()
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 2 && service.deferredRestoration.ids.isEmpty,
+                     "superseded headless intent does not restore another display after lid opening")
+
+        service = make()
+        UserDefaults.standard.stored = [1]
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        service.restoreDisplaysLeftOff()
+        DispatchQueue.main.drain()
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids == [1],
+                     "headless success preserves an independently owed restoration")
+        Hardware.lid = false
+        service.restoreDeferredDisplays()
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids.isEmpty && Hardware.transactions == 3,
+                     "independent deferred restoration still completes after headless success")
+
+        service = make()
         UserDefaults.standard.stored = [1]
         service.restoreDisplaysLeftOff()
         service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)

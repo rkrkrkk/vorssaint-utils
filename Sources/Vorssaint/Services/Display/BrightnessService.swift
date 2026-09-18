@@ -1353,8 +1353,13 @@ final class BrightnessService: ObservableObject {
             guard let self else { return }
             var restored: CGDirectDisplayID?
             var failure: DisplayControlFailure = .closedLid
+            let preexistingDeferred = self.deferredRestoration.ids
             for id in candidates {
-                let result = self.restoreDisplay(id)
+                let result = Self.configureDisplay(id, enabled: true)
+                self.deferredRestoration.recordHeadless(
+                    id, result: result, wasPreviouslyDeferred: preexistingDeferred.contains(id))
+                self.syncLidObserver()
+                if result == .success { self.displayControlFailure = nil }
                 if result == .success {
                     restored = id
                     break
@@ -1362,6 +1367,8 @@ final class BrightnessService: ObservableObject {
                 if result == .failed { failure = .failed }
             }
             if let restored {
+                self.deferredRestoration.cancelHeadless()
+                self.syncLidObserver()
                 self.stateLock.lock()
                 self.managedDisabledIDs.remove(restored)
                 self.managedDisabledDisplays.removeValue(forKey: restored)

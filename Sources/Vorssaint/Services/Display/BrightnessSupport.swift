@@ -183,14 +183,33 @@ enum BrightnessSupport {
     /// Only automatic restoration denied by the lid owns a deferred request.
     struct DeferredDisplayRestoration {
         private(set) var ids = Set<UInt32>()
+        private var headlessIDs = Set<UInt32>()
         private var lastLidClosed: Bool? = true
 
         mutating func record(_ id: UInt32, result: DisplayConfigurationResult) {
             if result == .closedLid {
                 ids.insert(id)
+                headlessIDs.remove(id)
                 lastLidClosed = true
             }
-            if result == .success { ids.remove(id) }
+            if result == .success {
+                ids.remove(id)
+                headlessIDs.remove(id)
+            }
+        }
+
+        mutating func recordHeadless(_ id: UInt32,
+                                     result: DisplayConfigurationResult,
+                                     wasPreviouslyDeferred: Bool) {
+            record(id, result: result)
+            if result == .closedLid && !wasPreviouslyDeferred {
+                headlessIDs.insert(id)
+            }
+        }
+
+        mutating func cancelHeadless() {
+            ids.subtract(headlessIDs)
+            headlessIDs.removeAll()
         }
 
         mutating func candidates(lidClosed: Bool?) -> Set<UInt32> {
