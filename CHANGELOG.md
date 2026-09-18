@@ -49,6 +49,7 @@ App Switcher makes multiple windows easier to see and brings selected windows fo
 - The window layout ring keeps the aimed direction while its default shortcut is held, instead of flashing back to maximize on every key repeat. Thanks to @Borisserz.
 - External monitors that answer brightness readings only when asked twice now show their real level instead of a guessed one, and a monitor written off earlier is checked again. Thanks to @PathGao.
 - Displays whose brightness slider does nothing behind a converter can dim the picture in software instead, from the panel or the Energy page, and return to the monitor's own control when that choice is turned off. Thanks to @sarat03.
+- The built-in display is no longer switched back on while the lid is closed; it comes back when the lid opens, and the panel says to open the lid when a switch has to wait. Thanks to @rkrkrkk.
 
 ## [3.4.0-beta.2.1] - 2026-09-16
 
