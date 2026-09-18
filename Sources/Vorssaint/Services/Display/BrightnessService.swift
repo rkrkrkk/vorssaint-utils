@@ -788,6 +788,7 @@ final class BrightnessService: ObservableObject {
         let ids = managedDisabledIDs
         stateLock.unlock()
         for id in ids {
+            deferredRestoration.requestRestoreAll(id)
             guard restoreDisplay(id) == .success else { continue }
             stateLock.lock()
             managedDisabledIDs.remove(id)
@@ -847,6 +848,7 @@ final class BrightnessService: ObservableObject {
             // imported, so anything that is not a display number is skipped
             // rather than converted.
             guard let displayID = CGDirectDisplayID(exactly: id) else { continue }
+            deferredRestoration.requestRestoreAll(displayID)
             guard restoreDisplay(displayID) == .success else { continue }
             Self.forgetDisplaySwitchedOff(displayID)
         }
@@ -1353,11 +1355,9 @@ final class BrightnessService: ObservableObject {
             guard let self else { return }
             var restored: CGDirectDisplayID?
             var failure: DisplayControlFailure = .closedLid
-            let preexistingDeferred = self.deferredRestoration.ids
             for id in candidates {
                 let result = Self.configureDisplay(id, enabled: true)
-                self.deferredRestoration.recordHeadless(
-                    id, result: result, wasPreviouslyDeferred: preexistingDeferred.contains(id))
+                self.deferredRestoration.recordHeadless(id, result: result)
                 self.syncLidObserver()
                 if result == .success { self.displayControlFailure = nil }
                 if result == .success {

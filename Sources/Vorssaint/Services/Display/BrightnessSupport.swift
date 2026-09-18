@@ -184,32 +184,35 @@ enum BrightnessSupport {
     struct DeferredDisplayRestoration {
         private(set) var ids = Set<UInt32>()
         private var headlessIDs = Set<UInt32>()
+        private var restoreAllIDs = Set<UInt32>()
         private var lastLidClosed: Bool? = true
 
         mutating func record(_ id: UInt32, result: DisplayConfigurationResult) {
             if result == .closedLid {
                 ids.insert(id)
-                headlessIDs.remove(id)
                 lastLidClosed = true
             }
             if result == .success {
                 ids.remove(id)
                 headlessIDs.remove(id)
+                restoreAllIDs.remove(id)
             }
         }
 
+        mutating func requestRestoreAll(_ id: UInt32) {
+            restoreAllIDs.insert(id)
+        }
+
         mutating func recordHeadless(_ id: UInt32,
-                                     result: DisplayConfigurationResult,
-                                     wasPreviouslyDeferred: Bool) {
-            let wasHeadless = headlessIDs.contains(id)
+                                     result: DisplayConfigurationResult) {
             record(id, result: result)
-            if result == .closedLid && (!wasPreviouslyDeferred || wasHeadless) {
+            if result == .closedLid && !restoreAllIDs.contains(id) {
                 headlessIDs.insert(id)
             }
         }
 
         mutating func cancelHeadless() {
-            ids.subtract(headlessIDs)
+            ids.subtract(headlessIDs.subtracting(restoreAllIDs))
             headlessIDs.removeAll()
         }
 

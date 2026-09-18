@@ -286,6 +286,21 @@ enum DisplayRestorationTests {
                      "repeated headless attempts retain ownership until a later external success")
 
         service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        Hardware.succeeds = false
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        service.restoreManagedDisplays()
+        DispatchQueue.main.drain()
+        Hardware.succeeds = true
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids == [1],
+                     "a later failed restore-all request promotes prior headless intent")
+
+        service = make()
         UserDefaults.standard.stored = [1]
         service.restoreDisplaysLeftOff()
         service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
