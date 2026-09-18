@@ -201,8 +201,9 @@ enum BrightnessSupport {
         mutating func recordHeadless(_ id: UInt32,
                                      result: DisplayConfigurationResult,
                                      wasPreviouslyDeferred: Bool) {
+            let wasHeadless = headlessIDs.contains(id)
             record(id, result: result)
-            if result == .closedLid && !wasPreviouslyDeferred {
+            if result == .closedLid && (!wasPreviouslyDeferred || wasHeadless) {
                 headlessIDs.insert(id)
             }
         }

@@ -252,7 +252,7 @@ enum DisplayRestorationTests {
         Hardware.lid = false
         service.restoreDeferredDisplays()
         DispatchQueue.main.drain()
-        suite.expect(Hardware.transactions == 2 && service.deferredRestoration.ids.isEmpty,
+        suite.expect(Hardware.transactions == 1 && service.deferredRestoration.ids.isEmpty,
                      "superseded headless intent does not restore another display after lid opening")
 
         service = make()
@@ -269,8 +269,21 @@ enum DisplayRestorationTests {
         Hardware.lid = false
         service.restoreDeferredDisplays()
         DispatchQueue.main.drain()
-        suite.expect(service.deferredRestoration.ids.isEmpty && Hardware.transactions == 3,
+        suite.expect(service.deferredRestoration.ids.isEmpty && Hardware.transactions == 2,
                      "independent deferred restoration still completes after headless success")
+
+        service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        Hardware.succeeds = false
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        Hardware.succeeds = true
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids.isEmpty,
+                     "repeated headless attempts retain ownership until a later external success")
 
         service = make()
         UserDefaults.standard.stored = [1]
