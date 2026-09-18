@@ -2533,6 +2533,20 @@ struct MetricsTests {
             expect(migrationDefaults.object(forKey: DefaultsKey.switcherWindowlessApps) == nil,
                    "a setup that kept the windowless desktop app is left exactly as it was")
 
+            migrationDefaults.set(["display|port"],
+                                  forKey: DefaultsKey.brightnessDDCWriteOnlyPaths)
+            Defaults.recheckBrightnessDDCWriteOnlyPaths(in: migrationDefaults)
+            expect(migrationDefaults.object(forKey: DefaultsKey.brightnessDDCWriteOnlyPaths) == nil
+                   && migrationDefaults.bool(
+                    forKey: DefaultsKey.brightnessDDCWriteOnlyPathsRechecked),
+                   "verdicts cached before paired discovery requests are classified again")
+            migrationDefaults.set(["display|port"],
+                                  forKey: DefaultsKey.brightnessDDCWriteOnlyPaths)
+            Defaults.recheckBrightnessDDCWriteOnlyPaths(in: migrationDefaults)
+            expect(migrationDefaults.stringArray(forKey: DefaultsKey.brightnessDDCWriteOnlyPaths)
+                   == ["display|port"],
+                   "the recheck runs once and keeps later verdicts")
+
             migrationDefaults.removeObject(
                 forKey: DefaultsKey.unifiedScreenCaptureShortcutMigrated)
             migrationDefaults.set(false, forKey: DefaultsKey.screenshotShortcutEnabled)
@@ -7177,6 +7191,10 @@ struct MetricsTests {
                "moving down-right triggers bottom right")
         expect(WindowDirectionalGestureSupport.action(from: dirOrigin, to: CGPoint(x: 160, y: 160)) == .bottomLeft,
                "moving down-left triggers bottom left")
+        expect(!WindowDirectionalGestureSupport.shouldApplyKeyboardManualOverride(isAutorepeat: true),
+               "auto-repeat never forces a manual maximize/minimize override")
+        expect(WindowDirectionalGestureSupport.shouldApplyKeyboardManualOverride(isAutorepeat: false),
+               "a distinct Space, Return, or Up tap still maximizes while the ring is open")
 
         expect(MediaImageFormat.sanitized("pdf") == .pdf,
                "Image converter accepts the PDF format")
@@ -10462,6 +10480,8 @@ struct MetricsTests {
                "an elevated install hands the bundle back to the user")
         expect(installerScript.contains("update-old.$PID"),
                "the swap backup name is unique per run so a stale root-owned one never blocks it")
+        expect(installerScript.contains("STAGE=\"$DIR/.$NAME.update-new\""),
+               "the staged copy is hidden so search never lists it under the staging name")
         expect(installerScript.contains("launchctl asuser"),
                "installer script relaunches as the user when running as root")
         expect(installerScript.contains("$RESULT.progress") && installerScript.contains("finalize"),
@@ -16708,6 +16728,14 @@ struct MetricsTests {
                 == BrightnessSupport.retryAttempts + 1
                 && BrightnessSupport.ddcProbeWriteCycles(classifyingChannel: true) == 1,
                "channel discovery keeps its reply chances but sends one spaced write each")
+        expect(BrightnessSupport.ddcProbeWriteCycles(classifyingChannel: true,
+                                                     isFinalAttempt: true)
+                == BrightnessSupport.writeCycles,
+               "discovery pairs its requests once before writing a channel off as unreadable")
+        expect(BrightnessSupport.ddcProbeWriteCycles(classifyingChannel: false,
+                                                     isFinalAttempt: true)
+                == BrightnessSupport.writeCycles,
+               "a classified channel keeps its paired requests on every attempt")
         expect(BrightnessSupport.ddcProbeAttempts()
                 == BrightnessSupport.retryAttempts + 1
                 && BrightnessSupport.ddcProbeWriteCycles(classifyingChannel: false)
