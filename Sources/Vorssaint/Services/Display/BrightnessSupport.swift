@@ -180,11 +180,14 @@ enum BrightnessSupport {
         case success, closedLid, failed
     }
 
-    /// Only automatic restoration denied by the lid owns a deferred request.
+    /// An enable the closed lid denied waits here until the lid opens. A
+    /// request a person tapped for, or one a restore-all owes, is kept when a
+    /// headless recovery brings another display back instead; a request only
+    /// that recovery made is dropped then.
     struct DeferredDisplayRestoration {
         private(set) var ids = Set<UInt32>()
         private var headlessIDs = Set<UInt32>()
-        private var restoreAllIDs = Set<UInt32>()
+        private var keptIDs = Set<UInt32>()
         private var lastLidClosed: Bool? = true
 
         mutating func record(_ id: UInt32, result: DisplayConfigurationResult) {
@@ -195,24 +198,24 @@ enum BrightnessSupport {
             if result == .success {
                 ids.remove(id)
                 headlessIDs.remove(id)
-                restoreAllIDs.remove(id)
+                keptIDs.remove(id)
             }
         }
 
-        mutating func requestRestoreAll(_ id: UInt32) {
-            restoreAllIDs.insert(id)
+        mutating func keep(_ id: UInt32) {
+            keptIDs.insert(id)
         }
 
         mutating func recordHeadless(_ id: UInt32,
                                      result: DisplayConfigurationResult) {
             record(id, result: result)
-            if result == .closedLid && !restoreAllIDs.contains(id) {
+            if result == .closedLid && !keptIDs.contains(id) {
                 headlessIDs.insert(id)
             }
         }
 
         mutating func cancelHeadless() {
-            ids.subtract(headlessIDs.subtracting(restoreAllIDs))
+            ids.subtract(headlessIDs.subtracting(keptIDs))
             headlessIDs.removeAll()
         }
 

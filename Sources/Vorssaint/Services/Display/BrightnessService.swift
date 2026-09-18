@@ -595,6 +595,13 @@ final class BrightnessService: ObservableObject {
         let result = Self.configureDisplay(display.id, enabled: enabled)
         guard result == .success else {
             if !enabled { Self.forgetDisplaySwitchedOff(display.id) }
+            if result == .closedLid {
+                // The panel tells the person to open the lid, so opening it
+                // has to finish what the tap asked for.
+                deferredRestoration.keep(display.id)
+                deferredRestoration.record(display.id, result: .closedLid)
+                syncLidObserver()
+            }
             finishDisplayToggle(id: display.id, enabled: enabled,
                                 failure: result == .closedLid ? .closedLid : .failed)
             return
@@ -788,7 +795,7 @@ final class BrightnessService: ObservableObject {
         let ids = managedDisabledIDs
         stateLock.unlock()
         for id in ids {
-            deferredRestoration.requestRestoreAll(id)
+            deferredRestoration.keep(id)
             guard restoreDisplay(id) == .success else { continue }
             stateLock.lock()
             managedDisabledIDs.remove(id)
@@ -848,7 +855,7 @@ final class BrightnessService: ObservableObject {
             // imported, so anything that is not a display number is skipped
             // rather than converted.
             guard let displayID = CGDirectDisplayID(exactly: id) else { continue }
-            deferredRestoration.requestRestoreAll(displayID)
+            deferredRestoration.keep(displayID)
             guard restoreDisplay(displayID) == .success else { continue }
             Self.forgetDisplaySwitchedOff(displayID)
         }

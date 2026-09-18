@@ -180,13 +180,38 @@ enum DisplayRestorationTests {
         Hardware.lid = true
         DispatchQueue.main.drain()
         suite.expect(service.displayControlFailure == .closedLid && Hardware.transactions == 0
-                     && service.deferredRestoration.ids.isEmpty,
-                     "manual enable uses transaction-time closed reason without enrolling a deferred request")
+                     && service.deferredRestoration.ids == [1] && Hardware.registrations == 1,
+                     "a tap denied by the closed lid says so and is remembered for the lid opening")
         Hardware.lid = false
+        Hardware.callback?()
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 1 && service.displayControlFailure == nil
+                     && service.deferredRestoration.ids.isEmpty && service.managedDisabledIDs.isEmpty
+                     && Hardware.destroyedPorts == 1,
+                     "opening the lid finishes the remembered tap and clears its message")
         Hardware.succeeds = false
         service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
         DispatchQueue.main.drain()
-        suite.expect(service.displayControlFailure == .failed, "an open-lid transaction failure remains generic")
+        suite.expect(service.displayControlFailure == .failed && service.deferredRestoration.ids.isEmpty,
+                     "an open-lid transaction failure remains generic and is not remembered")
+
+        service = make()
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        service.commitDisplayToggle(BrightnessDisplay(id: 1), enabled: true)
+        DispatchQueue.main.drain()
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids == [1] && service.managedDisabledIDs == [1]
+                     && Hardware.transactions == 1 && Hardware.destroyedPorts == 0,
+                     "a remembered tap outlives a headless recovery that brought another display back")
+        Hardware.lid = false
+        service.restoreDeferredDisplays()
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 2 && service.deferredRestoration.ids.isEmpty
+                     && service.managedDisabledIDs.isEmpty,
+                     "opening the lid then finishes the tap as well")
 
         service = make()
         UserDefaults.standard.stored = [1]
