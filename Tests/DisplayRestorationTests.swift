@@ -302,7 +302,38 @@ enum DisplayRestorationTests {
         _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
         DispatchQueue.main.drain()
         suite.expect(service.deferredRestoration.ids == [1],
-                     "a later failed restore-all request promotes prior headless intent")
+                     "a failed restore-all request promotes prior headless intent")
+
+        service = make()
+        UserDefaults.standard.stored = [1, 2]
+        service.managedDisabledIDs = [1, 2]
+        service.managedDisabledDisplays[1] = BrightnessDisplay(id: 1)
+        service.managedDisabledDisplays[2] = BrightnessDisplay(id: 2)
+        Hardware.succeeds = false
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids == [1],
+                     "failed headless round keeps the closed internal request queued")
+        var retryReads = [false, true]
+        Hardware.lidRead = { retryReads.isEmpty ? true : retryReads.removeFirst() }
+        service.restoreDeferredDisplays()
+        Hardware.lidRead = nil
+        Hardware.lid = true
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 1 && service.deferredRestoration.ids == [1],
+                     "a deferred retry that closes at the transaction keeps headless ownership")
+        Hardware.lid = true
+        Hardware.succeeds = true
+        _ = service.restoreManagedDisplayIfHeadless(drawableDisplayIDs: [])
+        DispatchQueue.main.drain()
+        suite.expect(service.deferredRestoration.ids.isEmpty && service.managedDisabledIDs == [1]
+                     && UserDefaults.standard.stored == [1] && Hardware.destroyedPorts == 1,
+                     "later external headless success cancels only the internal headless request: ids=\(service.deferredRestoration.ids) managed=\(service.managedDisabledIDs) stored=\(UserDefaults.standard.stored) destroyed=\(Hardware.destroyedPorts)")
+        Hardware.lid = false
+        service.restoreDeferredDisplays()
+        DispatchQueue.main.drain()
+        suite.expect(Hardware.transactions == 2 && UserDefaults.standard.stored == [1],
+                     "opening after cancellation does not enable the internal display: transactions=\(Hardware.transactions) stored=\(UserDefaults.standard.stored)")
 
         service = make()
         service.managedDisabledIDs = [1, 2]
